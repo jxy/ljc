@@ -2,6 +2,8 @@
 set -u
 
 declare jxy_debug=N
+declare jxy_verbose=N
+declare -i jxy_sleep=600
 
 if [[ -s local_job_control.config ]]; then
     source local_job_control.config
@@ -74,6 +76,9 @@ is_running() {
             break
         fi
     done
+    if ((found == 0)); then
+        verbose_put Found the running job $1
+    fi
     return $found
 }
 
@@ -89,7 +94,7 @@ main() {
         jobname=$(basename "${jxy_jobs[$n]}")
         script="$jobname"
         if ! is_running "$jobname"; then
-            info_put $(date) ::: submitting job $jobname
+            log_put $(date) ::: submitting job $jobname
             submit_jobs "$dir" "$script" "$jobname"
         fi
     done
@@ -98,33 +103,43 @@ main() {
 requested_stop() {
     local -r stop_file=STOP
     if [[ -f $stop_file ]]; then
-        info_put Sees STOP file.
+        log_put Sees STOP file.
         return 0
     else
         return 1
     fi
 }
 
-info_put() {
-    echo "INFO: ${@}"
+verbose_put() {
+    if [[ $jxy_verbose == Y ]]; then
+        echo "$@"
+    fi
+}
+log_put() {
+    echo "LOG: $@"
 }
 debug_put() {
     if [[ $jxy_debug == Y ]]; then
-        echo "DEBUG: ${@}" >&2
+        echo "DEBUG: $@" >&2
     fi
 }
 error_put() {
-    echo "ERROR: ${@}" >&2
+    echo "ERROR: $@" >&2
 }
 
 while (($# > 0)); do
     case $1 in
-        (-d)    jxy_debug=Y ; shift ;;
-        (*)     error_put unknown argument $1 ; exit 1 ;;
+        (-d) jxy_debug=Y ; shift ;;
+        (-v) jxy_verbose=Y ; shift ;;
+        (*)  error_put unknown argument $1 ; exit 1 ;;
     esac
 done
 
 until requested_stop; do
-    main
-    sleep 600
+    if [[ $jxy_verbose == Y ]]; then
+        main 2>&1 | tee -a "local_job_control-$(hostname)-$$.log"
+    else
+        main >> "local_job_control-$(hostname)-$$.log" 2>&1
+    fi
+    sleep $jxy_sleep
 done
