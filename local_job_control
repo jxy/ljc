@@ -1,0 +1,130 @@
+#!/bin/bash
+set -u
+
+declare jxy_debug=N
+
+if [[ -s local_job_control.config ]]; then
+    source local_job_control.config
+else
+    declare -ra jxy_jobs=(
+        dir1/j1
+        ./NON_EXIST_FOR_TEST
+    )
+    declare -r jxy_check_running_jobs=check_running_jobs_test
+    declare -r jxy_submit_jobs=submit_jobs_test
+    jxy_debug=Y
+fi
+
+
+declare -a jxy_current_running=()
+
+#---- BEGIN scripts for BG/Q at ANL ----
+check_running_jobs_bgq_anl() {
+    jxy_current_running=(
+        $(qstat -u xyjin -f | awk 'NR>2{print $2}')
+    )
+}
+#----- END scripts for BG/Q at ANL -----
+
+check_running_jobs_test() {
+    debug_put check_running_jobs_test $@
+    jxy_current_running=( j1 )
+}
+
+submit_jobs_test() {
+    debug_put submit_jobs_test $@
+    debug_put submit_jobs_test: script = $script
+    debug_put submit_jobs_test: jobname = $jobname
+    # return 1
+}
+
+submit_jobs() {
+    debug_put submit_jobs $@
+    local -r dir="$1"
+    shift
+    if [[ ! -d $dir ]]; then
+        error_put No directory named $dir
+        return 1
+    fi
+    cd "$dir"
+    local -r script="$1"
+    local -r jobname="$2"
+    until $jxy_submit_jobs; do
+        error_put Failed submitting the job.  Wait for half an hour.
+        sleep 1800
+    done
+    cd ..
+}
+
+check_running_jobs() {
+    # this works with BG/Q at ANL
+    until $jxy_check_running_jobs; do
+        error_put Failed checking running jobs.  Wait for half an hour.
+        sleep 1800
+    done
+}
+
+is_running() {
+    local -i n
+    local -i found=255
+    for ((n=0; n<${#jxy_current_running[@]}; ++n)); do
+        debug_put $n ${jxy_current_running[$n]}
+        if [[ ${jxy_current_running[$n]} == $1 ]]; then
+            found=0
+            break
+        fi
+    done
+    return $found
+}
+
+main() {
+    check_running_jobs
+    local -i n
+    local dir
+    local jobname
+    local script
+    for ((n=0; n<${#jxy_jobs[@]}; ++n)); do
+        debug_put $n ${jxy_jobs[$n]}
+        dir=$(dirname "${jxy_jobs[$n]}")
+        jobname=$(basename "${jxy_jobs[$n]}")
+        script="$jobname"
+        if ! is_running "$jobname"; then
+            info_put $(date) ::: submitting job $jobname
+            submit_jobs "$dir" "$script" "$jobname"
+        fi
+    done
+}
+
+requested_stop() {
+    local -r stop_file=STOP
+    if [[ -f $stop_file ]]; then
+        info_put Sees STOP file.
+        return 0
+    else
+        return 1
+    fi
+}
+
+info_put() {
+    echo "INFO: ${@}"
+}
+debug_put() {
+    if [[ $jxy_debug == Y ]]; then
+        echo "DEBUG: ${@}" >&2
+    fi
+}
+error_put() {
+    echo "ERROR: ${@}" >&2
+}
+
+while (($# > 0)); do
+    case $1 in
+        (-d)    jxy_debug=Y ; shift ;;
+        (*)     error_put unknown argument $1 ; exit 1 ;;
+    esac
+done
+
+until requested_stop; do
+    main
+    sleep 600
+done
