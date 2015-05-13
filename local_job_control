@@ -1,16 +1,40 @@
 #!/bin/bash
 set -u
 
+declare -r local_config="local_job_control.config"
+
 declare jxy_debug=N
 declare jxy_verbose=N
 declare -i jxy_sleep=600
 
-if [[ -s local_job_control.config ]]; then
-    source local_job_control.config
+verbose_put() {
+    if [[ $jxy_verbose == Y ]]; then
+        echo "$@"
+    fi
+}
+log_put() {
+    echo "LOG: $@"
+}
+debug_put() {
+    if [[ $jxy_debug == Y ]]; then
+        echo "DEBUG: $@" >&2
+    fi
+}
+warning_put() {
+    echo "WARNING: $@" >&2
+}
+error_put() {
+    echo "ERROR: $@" >&2
+    exit 1
+}
+
+if [[ -s $local_config ]]; then
+    source $local_config
 else
+    log_put "No local config file: $local_config.  Use a testing setup."
     declare -ra jxy_jobs=(
-        dir1/j1
-        ./NON_EXIST_FOR_TEST
+        "dir1/j1"
+        "./NON_EXIST_FOR_TEST"
     )
     declare -r jxy_check_running_jobs=check_running_jobs_test
     declare -r jxy_submit_jobs=submit_jobs_test
@@ -29,30 +53,30 @@ check_running_jobs_bgq_anl() {
 #----- END scripts for BG/Q at ANL -----
 
 check_running_jobs_test() {
-    debug_put check_running_jobs_test $@
+    debug_put "check_running_jobs_test $@"
     jxy_current_running=( j1 )
 }
 
 submit_jobs_test() {
-    debug_put submit_jobs_test $@
-    debug_put submit_jobs_test: script = $script
-    debug_put submit_jobs_test: jobname = $jobname
+    debug_put "submit_jobs_test $@"
+    debug_put "submit_jobs_test: script = $script"
+    debug_put "submit_jobs_test: jobname = $jobname"
     # return 1
 }
 
 submit_jobs() {
-    debug_put submit_jobs $@
+    debug_put "submit_jobs $@"
     local -r dir="$1"
     shift
     if [[ ! -d $dir ]]; then
-        error_put No directory named $dir
+        warning_put "No directory named $dir"
         return 1
     fi
     cd "$dir"
     local -r script="$1"
     local -r jobname="$2"
     until $jxy_submit_jobs; do
-        error_put Failed submitting the job.  Wait for half an hour.
+        warning_put "Failed submitting the job.  Wait for half an hour."
         sleep 1800
     done
     cd ..
@@ -61,7 +85,7 @@ submit_jobs() {
 check_running_jobs() {
     # this works with BG/Q at ANL
     until $jxy_check_running_jobs; do
-        error_put Failed checking running jobs.  Wait for half an hour.
+        warning_put "Failed checking running jobs.  Wait for half an hour."
         sleep 1800
     done
 }
@@ -70,14 +94,14 @@ is_running() {
     local -i n
     local -i found=255
     for ((n=0; n<${#jxy_current_running[@]}; ++n)); do
-        debug_put $n ${jxy_current_running[$n]}
+        debug_put "$n ${jxy_current_running[$n]}"
         if [[ ${jxy_current_running[$n]} == $1 ]]; then
             found=0
             break
         fi
     done
     if ((found == 0)); then
-        verbose_put Found the running job $1
+        verbose_put "Found the running job $1"
     fi
     return $found
 }
@@ -89,12 +113,12 @@ main() {
     local jobname
     local script
     for ((n=0; n<${#jxy_jobs[@]}; ++n)); do
-        debug_put $n ${jxy_jobs[$n]}
+        debug_put "$n ${jxy_jobs[$n]}"
         dir=$(dirname "${jxy_jobs[$n]}")
         jobname=$(basename "${jxy_jobs[$n]}")
         script="$jobname"
         if ! is_running "$jobname"; then
-            log_put $(date) ::: submitting job $jobname
+            log_put "$(date) ::: submitting job $jobname"
             submit_jobs "$dir" "$script" "$jobname"
         fi
     done
@@ -103,35 +127,18 @@ main() {
 requested_stop() {
     local -r stop_file=STOP
     if [[ -f $stop_file ]]; then
-        log_put Sees STOP file.
+        log_put "Sees STOP file."
         return 0
     else
         return 1
     fi
 }
 
-verbose_put() {
-    if [[ $jxy_verbose == Y ]]; then
-        echo "$@"
-    fi
-}
-log_put() {
-    echo "LOG: $@"
-}
-debug_put() {
-    if [[ $jxy_debug == Y ]]; then
-        echo "DEBUG: $@" >&2
-    fi
-}
-error_put() {
-    echo "ERROR: $@" >&2
-}
-
 while (($# > 0)); do
     case $1 in
         (-d) jxy_debug=Y ; shift ;;
         (-v) jxy_verbose=Y ; shift ;;
-        (*)  error_put unknown argument $1 ; exit 1 ;;
+        (*)  error_put "unknown argument $1" ;;
     esac
 done
 
