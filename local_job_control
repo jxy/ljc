@@ -6,6 +6,27 @@ declare jxy_verbose=N
 declare -i jxy_sleep=600
 
 if [[ -s local_job_control.config ]]; then
+    # Need three variables defined:
+    # 0. declare -a jxy_jobs
+    #    an array describing jobs, three elements for each job
+    #    - DIRECTORY :: the working directory for the job
+    #    - NAME      :: regex differentiate the name of the job
+    #                   will be assigned to a variable 'jobname'
+    #    - SCRIPT    :: usually the script name for submitting the job
+    #                   but can contain anything
+    #                   will be assigned to a variable 'script'
+    # 1. declare -r jxy_check_running_jobs
+    #    we execute the unquoted expansion of this variable
+    #    it must set an array variable 'jxy_current_running'
+    #    containing currently running job names
+    #    that would be matched against $jobname
+    # 2. declare -r jxy_submit_jobs
+    #    we execute the unquoted expansion of this variable
+    #    it may access variables 'jobname' and 'script'
+    #    which come from the array 'jxy_jobs'
+    # See the else part for an example.
+    # See the /test functions for config/ part for test.
+    # See the /scripts for BG/Q at ANL/ for BG/Q@ANL use.
     source local_job_control.config
 else
     # a list of DIR NAME[Regex] SCRIPT
@@ -34,6 +55,28 @@ get_job_script() {
 
 declare -a jxy_current_running=()
 
+#---- BEGIN test functions for config ----
+check_running_jobs_test() {
+    debug_put check_running_jobs_test $@
+    jxy_current_running=( j1 )
+}
+
+submit_jobs_test() {
+    debug_put submit_jobs_test $@
+    debug_put submit_jobs_test: script = $script
+    debug_put submit_jobs_test: jobname = $jobname
+    # return 1
+}
+#----- END test functions for config -----
+
+#---- BEGIN scripts for BG/Q at ANL ----
+check_running_jobs_bgq_anl() {
+    jxy_current_running=(
+        $(qstat -u xyjin -f | awk 'NR>2{print $2}')
+    )
+}
+#----- END scripts for BG/Q at ANL -----
+
 declare -ai jxy_jobs_skip=()
 set_skip_job() {
     local -ri n=$1
@@ -50,26 +93,6 @@ not_skip_job() {
         if ((n==${jxy_jobs_skip[$i]})); then st=1; break; fi
     done
     return $st
-}
-
-#---- BEGIN scripts for BG/Q at ANL ----
-check_running_jobs_bgq_anl() {
-    jxy_current_running=(
-        $(qstat -u xyjin -f | awk 'NR>2{print $2}')
-    )
-}
-#----- END scripts for BG/Q at ANL -----
-
-check_running_jobs_test() {
-    debug_put check_running_jobs_test $@
-    jxy_current_running=( j1 )
-}
-
-submit_jobs_test() {
-    debug_put submit_jobs_test $@
-    debug_put submit_jobs_test: script = $script
-    debug_put submit_jobs_test: jobname = $jobname
-    # return 1
 }
 
 submit_jobs() {
