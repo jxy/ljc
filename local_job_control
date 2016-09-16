@@ -1,48 +1,56 @@
 #!/bin/bash
 set -u
 
-declare -r local_config="local_job_control.config"
-
 declare jxy_debug=N
 declare jxy_verbose=N
 declare -i jxy_sleep=600
 
-verbose_put() {
-    if [[ $jxy_verbose == Y ]]; then
-        echo "$@"
-    fi
-}
-log_put() {
-    echo "LOG: $@"
-}
-debug_put() {
-    if [[ $jxy_debug == Y ]]; then
-        echo "DEBUG: $@" >&2
-    fi
-}
-warning_put() {
-    echo "WARNING: $@" >&2
-}
-error_put() {
-    echo "ERROR: $@" >&2
-    exit 1
-}
-
-if [[ -s $local_config ]]; then
-    source $local_config
+if [[ -s local_job_control.config ]]; then
+    source local_job_control.config
 else
-    log_put "No local config file: $local_config.  Use a testing setup."
+    # a list of DIR NAME[Regex] SCRIPT
     declare -ra jxy_jobs=(
-        "dir1/j1"
-        "./NON_EXIST_FOR_TEST"
+        dir1 'j[0-9]' j1
+        . NON_EXIST_FOR_TEST NON_EXIST
     )
     declare -r jxy_check_running_jobs=check_running_jobs_test
     declare -r jxy_submit_jobs=submit_jobs_test
     jxy_debug=Y
 fi
 
+declare -ri jxy_jobs_n=$((${#jxy_jobs[@]}/3))
+get_job_dir() {
+    local -ri n=$1
+    printf "%s" "${jxy_jobs[$((3*n))]}"
+}
+get_job_name() {
+    local -ri n=$1
+    printf "%s" "${jxy_jobs[$((3*n+1))]}"
+}
+get_job_script() {
+    local -ri n=$1
+    printf "%s" "${jxy_jobs[$((3*n+2))]}"
+}
 
 declare -a jxy_current_running=()
+
+declare -ai jxy_jobs_skip=()
+set_skip_job() {
+    local -ri n=$1
+    log_put remember to skip job $n $(get_job_name $n)
+    if not_skip_job $n; then
+        jxy_jobs_skip[${#jxy_jobs_skip[@]}]=$n
+    fi
+}
+not_skip_job() {
+    local -ri n=$1
+    local -i st=0
+    local -i i
+    for ((i=0;i<${#jxy_jobs_skip[@]};++i)); do
+        if ((n==${jxy_jobs_skip[$i]})); then st=1; break; fi
+    done
+    return $st
+}
 
 #---- BEGIN scripts for BG/Q at ANL ----
 check_running_jobs_bgq_anl() {
@@ -53,40 +61,48 @@ check_running_jobs_bgq_anl() {
 #----- END scripts for BG/Q at ANL -----
 
 check_running_jobs_test() {
-    debug_put "check_running_jobs_test $@"
+    debug_put check_running_jobs_test $@
     jxy_current_running=( j1 )
 }
 
 submit_jobs_test() {
-    debug_put "submit_jobs_test $@"
-    debug_put "submit_jobs_test: script = $script"
-    debug_put "submit_jobs_test: jobname = $jobname"
+    debug_put submit_jobs_test $@
+    debug_put submit_jobs_test: script = $script
+    debug_put submit_jobs_test: jobname = $jobname
     # return 1
 }
 
 submit_jobs() {
-    debug_put "submit_jobs $@"
+    debug_put submit_jobs $@
     local -r dir="$1"
     shift
     if [[ ! -d $dir ]]; then
-        warning_put "No directory named $dir"
+        error_put No directory named $dir
         return 1
     fi
-    cd "$dir"
-    local -r script="$1"
-    local -r jobname="$2"
-    until $jxy_submit_jobs; do
-        warning_put "Failed submitting the job.  Wait for half an hour."
-        sleep 1800
-    done
-    cd ..
+    local -i st=0
+    pushd "$dir" >/dev/null
+    if stop_or_wait 0; then
+        local -r script="$1"
+        local -r jobname="$2"
+        log_put submitting job $jobname
+        until $jxy_submit_jobs; do
+            error_put Failed submitting the job.  Wait for half an hour.
+            stop_or_wait 1800 || break
+        done
+    else
+        st=1
+        log_put Skipping job $jobname
+    fi
+    popd >/dev/null
+    return $st
 }
 
 check_running_jobs() {
     # this works with BG/Q at ANL
     until $jxy_check_running_jobs; do
-        warning_put "Failed checking running jobs.  Wait for half an hour."
-        sleep 1800
+        error_put Failed checking running jobs.  Wait for half an hour.
+        stop_or_wait 1800 || return
     done
 }
 
@@ -94,59 +110,83 @@ is_running() {
     local -i n
     local -i found=255
     for ((n=0; n<${#jxy_current_running[@]}; ++n)); do
-        debug_put "$n ${jxy_current_running[$n]}"
-        if [[ ${jxy_current_running[$n]} == $1 ]]; then
+        debug_put $n ${jxy_current_running[$n]}
+        if [[ ${jxy_current_running[$n]} =~ $1 ]]; then
             found=0
             break
         fi
     done
     if ((found == 0)); then
-        verbose_put "Found the running job $1"
+        verbose_put Found the running job $1
     fi
     return $found
 }
 
 main() {
-    check_running_jobs
+    check_running_jobs || return
     local -i n
     local dir
     local jobname
     local script
-    for ((n=0; n<${#jxy_jobs[@]}; ++n)); do
-        debug_put "$n ${jxy_jobs[$n]}"
-        dir=$(dirname "${jxy_jobs[$n]}")
-        jobname=$(basename "${jxy_jobs[$n]}")
-        script="$jobname"
+    for ((n=0; n<jxy_jobs_n; ++n)); do
+        not_skip_job $n || continue
+        local dir="$(get_job_dir $n)"
+        local jobname="$(get_job_name $n)"
+        local script="$(get_job_script $n)"
+        debug_put $n $dir $jobname $script
         if ! is_running "$jobname"; then
-            log_put "$(date) ::: submitting job $jobname"
             submit_jobs "$dir" "$script" "$jobname"
+            if (($?!=0)); then set_skip_job $n; fi
         fi
     done
 }
 
-requested_stop() {
-    local -r stop_file=STOP
-    if [[ -f $stop_file ]]; then
-        log_put "Sees STOP file."
-        return 0
-    else
+stop_or_wait() {
+    local -ir s=$1
+    if [[ -f STOP ]]; then
+        debug_put "Sees STOP file under '$(pwd)'."
         return 1
+    else
+        sleep $s
     fi
 }
 
-while (($# > 0)); do
-    case $1 in
-        (-d) jxy_debug=Y ; shift ;;
-        (-v) jxy_verbose=Y ; shift ;;
-        (*)  error_put "unknown argument $1" ;;
-    esac
-done
-
-until requested_stop; do
+verbose_put() {
     if [[ $jxy_verbose == Y ]]; then
-        main 2>&1 | tee -a "local_job_control-$(hostname)-$$.log"
-    else
-        main >> "local_job_control-$(hostname)-$$.log" 2>&1
+        echo "$@"
     fi
-    sleep $jxy_sleep
-done
+}
+log_put() {
+    echo "LOG: $(date) ::: $@"
+}
+debug_put() {
+    if [[ $jxy_debug == Y ]]; then
+        echo "DEBUG: $(date) ::: $@" >&2
+    fi
+}
+error_put() {
+    echo "ERROR: $(date) ::: $@" >&2
+}
+
+check_args() {
+    while (($# > 0)); do
+        case $1 in
+            (-d) jxy_debug=Y ; shift ;;
+            (-v) jxy_verbose=Y ; shift ;;
+            (*)  error_put unknown argument $1 ; return 1 ;;
+        esac
+    done
+}
+
+loop() {
+    while true; do
+        if [[ $jxy_verbose == Y ]]; then
+            main 2>&1 | tee -a "local_job_control-$(hostname)-$$.log"
+        else
+            main >> "local_job_control-$(hostname)-$$.log" 2>&1
+        fi
+        stop_or_wait $jxy_sleep || return
+    done
+}
+
+check_args "$@" && loop
