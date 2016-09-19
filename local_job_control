@@ -202,7 +202,7 @@ check_args() {
 }
 
 loop() {
-    while true; do
+    while ((${#jxy_jobs[@]}>3*${#jxy_jobs_skip[@]})); do
         if [[ $jxy_verbose == Y ]]; then
             main 2>&1 | tee -a "local_job_control-$(hostname)-$$.log"
         else
