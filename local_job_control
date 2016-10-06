@@ -57,14 +57,14 @@ declare -a jxy_current_running=()
 
 #---- BEGIN test functions for config ----
 check_running_jobs_test() {
-    debug_put check_running_jobs_test $@
+    debug_put "check_running_jobs_test $@"
     jxy_current_running=( j1 )
 }
 
 submit_jobs_test() {
-    debug_put submit_jobs_test $@
-    debug_put submit_jobs_test: script = $script
-    debug_put submit_jobs_test: jobname = $jobname
+    debug_put "submit_jobs_test $@"
+    debug_put "submit_jobs_test: script = $script"
+    debug_put "submit_jobs_test: jobname = $jobname"
     # return 1
 }
 #----- END test functions for config -----
@@ -80,7 +80,7 @@ check_running_jobs_bgq_anl() {
 declare -ai jxy_jobs_skip=()
 set_skip_job() {
     local -ri n=$1
-    log_put remember to skip job $n $(get_job_name $n)
+    log_put "remember to skip job $n $(get_job_name $n)"
     if not_skip_job $n; then
         jxy_jobs_skip[${#jxy_jobs_skip[@]}]=$n
     fi
@@ -96,11 +96,11 @@ not_skip_job() {
 }
 
 submit_jobs() {
-    debug_put submit_jobs $@
+    debug_put "submit_jobs $@"
     local -r dir="$1"
     shift
     if [[ ! -d $dir ]]; then
-        error_put No directory named $dir
+        error_put "No directory named $dir"
         return 1
     fi
     local -i st=0
@@ -108,23 +108,22 @@ submit_jobs() {
     if stop_or_wait 0; then
         local -r script="$1"
         local -r jobname="$2"
-        log_put submitting job $jobname
+        log_put "submitting job $jobname"
         until $jxy_submit_jobs; do
-            error_put Failed submitting the job.  Wait for half an hour.
+            error_put "Failed submitting the job.  Wait for half an hour."
             stop_or_wait 1800 || break
         done
     else
         st=1
-        log_put Skipping job $jobname
+        log_put "Skipping job $jobname"
     fi
     popd >/dev/null
     return $st
 }
 
 check_running_jobs() {
-    # this works with BG/Q at ANL
     until $jxy_check_running_jobs; do
-        error_put Failed checking running jobs.  Wait for half an hour.
+        error_put "Failed checking jobs again.  Wait for half an hour."
         stop_or_wait 1800 || return
     done
 }
@@ -133,14 +132,14 @@ is_running() {
     local -i n
     local -i found=255
     for ((n=0; n<${#jxy_current_running[@]}; ++n)); do
-        debug_put $n ${jxy_current_running[$n]}
+        debug_put "$n ${jxy_current_running[$n]}"
         if [[ ${jxy_current_running[$n]} =~ $1 ]]; then
             found=0
             break
         fi
     done
     if ((found == 0)); then
-        verbose_put Found the running job $1
+        verbose_put "Found the running job $1"
     fi
     return $found
 }
@@ -156,7 +155,7 @@ main() {
         local dir="$(get_job_dir $n)"
         local jobname="$(get_job_name $n)"
         local script="$(get_job_script $n)"
-        debug_put $n $dir $jobname $script
+        debug_put "$n $dir $jobname $script"
         if ! is_running "$jobname"; then
             submit_jobs "$dir" "$script" "$jobname"
             if (($?!=0)); then set_skip_job $n; fi
@@ -168,6 +167,9 @@ stop_or_wait() {
     local -ir s=$1
     if [[ -f STOP ]]; then
         debug_put "Sees STOP file under '$(pwd)'."
+        return 1
+    elif [[ ! -z ${jobname:+X} && -f STOP.$jobname ]]; then
+        debug_put "Sees STOP.$jobname file under '$(pwd)'."
         return 1
     else
         sleep $s
@@ -196,7 +198,7 @@ check_args() {
         case $1 in
             (-d) jxy_debug=Y ; shift ;;
             (-v) jxy_verbose=Y ; shift ;;
-            (*)  error_put unknown argument $1 ; return 1 ;;
+            (*)  error_put "unknown argument $1" ; return 1 ;;
         esac
     done
 }
