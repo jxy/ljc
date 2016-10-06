@@ -115,7 +115,6 @@ submit_jobs() {
         done
     else
         st=1
-        log_put "Skipping job $jobname"
     fi
     popd >/dev/null
     return $st
