@@ -72,7 +72,7 @@ submit_jobs_test() {
 #---- BEGIN scripts for BG/Q at ANL ----
 check_running_jobs_bgq_anl() {
     jxy_current_running=(
-        $(qstat -u xyjin -f | awk 'NR>2{print $2}')
+        $(qstat -u $(whoami) -f | awk 'NR>2{print $2}')
     )
 }
 #----- END scripts for BG/Q at ANL -----
